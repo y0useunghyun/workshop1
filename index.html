@@ -411,7 +411,7 @@ pageBtns.forEach(b => b.onclick = () => {
   eggTaps = 0;
   show(b.dataset.p);
 });
-show('one');
+show(pages[location.hash.slice(1)] ? location.hash.slice(1) : 'one');
 </script>
 </body>
 </html>
