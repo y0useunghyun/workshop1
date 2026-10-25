@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>거침 부드러움</title>
+<title>롤 — 거침과 부드러움</title>
 <style>
 [hidden] { display: none !important }
 /* 1: 키친타올 롤(피그마 순서) / 2: 피그마 배치 롤 / 3: 거침·부드러움 두 롤 / 4: 세로 두 롤 / 원통. CSS 3D. 드래그 회전, 휠·핀치 확대, 사진 클릭하면 크게 */
@@ -70,6 +70,16 @@ figure { margin: 0 }
 #tp button:focus-visible { outline: 1px solid var(--fg) }
 #speed { min-width: 2.2em; justify-content: center; font-variant-numeric: tabular-nums }
 </style>
+<link rel="icon" href="https://y0useunghyun.github.io/workshop/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="https://y0useunghyun.github.io/workshop/apple-touch-icon.png">
+<!-- 워크숍 공통 틀(헤더·정보 종이) + Adobe Fonts workshop(JJJGothic) -->
+<link rel="stylesheet" href="https://y0useunghyun.github.io/workshop/shell.css">
+<script>
+  (function(d) {
+    var config = { kitId: 'kfl5mqg', scriptTimeout: 3000, async: true },
+    h=d.documentElement,t=setTimeout(function(){h.className=h.className.replace(/\bwf-loading\b/g,"")+" wf-inactive";},config.scriptTimeout),tk=d.createElement("script"),f=false,s=d.getElementsByTagName("script")[0],a;h.className+=" wf-loading";tk.src='https://use.typekit.net/'+config.kitId+'.js';tk.async=true;tk.onload=tk.onreadystatechange=function(){a=this.readyState;if(f||a&&a!="complete"&&a!="loaded")return;f=true;clearTimeout(t);try{Typekit.load(config)}catch(e){}};s.parentNode.insertBefore(tk,s)
+  })(document);
+</script>
 </head>
 <body>
 
@@ -92,6 +102,8 @@ figure { margin: 0 }
 </div>
 <div id="tp"><button id="play" aria-label="멈춤">❚❚</button><button id="speed" aria-label="배속">1×</button></div>
 
+<script src="https://y0useunghyun.github.io/workshop/shell.js"></script>
+<script>window.wsInfo = WS.subpage('roll');</script>
 <script src="items.js"></script>
 <script src="strip.js"></script>
 <script>
@@ -262,7 +274,7 @@ function makeSpin(page, geom, tilt, makeEls, opt = {}) {
   const setZoom = z => { sp.zoom = Math.max(opt.zoomMin ?? ZOOM_MIN, Math.min(ZOOM_MAX, z)); sp.layout(); };
 
   // 확대: 휠·트랙패드 핀치, 휴대폰 두 손가락
-  page.addEventListener('wheel', e => { e.preventDefault(); setZoom(sp.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
+  page.addEventListener('wheel', e => { if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return; e.preventDefault(); setZoom(sp.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
   const touches = new Map();
   let pinch = 0, px = 0, py = 0, moved = 0;
   const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
@@ -397,6 +409,7 @@ function show(p) {
   syncPlay();
   for (const s of spins) if (!s.root.hidden && !s.el) s.build();
   pageBtns.forEach(o => o.setAttribute('aria-current', o.dataset.p === p));
+  if (window.wsInfo) wsInfo.setPaper(p === 'ring' ? 'band' : 'roll');   // 정보 종이도 보기에 맞춰
 }
 // 이스터에그: 지금 도는 아이콘을 빠르게 세 번 누르면 숨겨 둔 롤 세 개가 나타남
 let eggTaps = 0, eggTimer = 0;
