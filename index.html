@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>거침 부드러움</title>
+<style>
+[hidden] { display: none !important }
+/* 1: 키친타올 롤(피그마 순서) / 2: 피그마 배치 롤 / 3: 거침·부드러움 두 롤 / 4: 세로 두 롤 / 원통. CSS 3D. 드래그 회전, 휠·핀치 확대, 사진 클릭하면 크게 */
+:root { --bg: #fff; --fg: #000; --paper: #f3f1ec; --paper-line: #d8d4cc; color-scheme: light }
+html, body { height: 100%; overflow-x: clip }
+body { background: var(--bg); color: var(--fg); margin: 0; font: 14px/1.6 system-ui, sans-serif }
+a { color: inherit }
+figure { margin: 0 }
+
+.m { display: block; width: 100%; height: 100%; object-fit: cover }
+.t { box-sizing: border-box; height: 100%; padding: 14px; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 12px }
+
+.spin-page { height: 100%; display: grid; place-items: center; perspective: 1600px; overflow: hidden; touch-action: none; cursor: grab; user-select: none }
+.spin-page:active { cursor: grabbing }
+.two { height: 100%; display: grid; grid-template-rows: 1fr 1fr } /* 위 = 거침, 아래 = 부드러움 */
+.two > .spin-page { height: auto; min-height: 0 }
+/* 세로 두 롤: 왼쪽 = 거침, 오른쪽 = 부드러움. 종이가 아래로 풀림 */
+.cols { height: 100%; display: grid; grid-template-columns: 1fr 1fr }
+.cols > .spin-page { height: 100%; min-width: 0 }
+.vpiece { position: absolute; overflow: hidden; cursor: zoom-in }
+.vpiece > div { position: absolute; transform: rotate(-90deg) } /* 롤 전체를 90° 돌린 만큼 자료는 반대로 돌려 바로 보이게 */
+.spin .vpiece .t { padding: calc(var(--s) * 4); font-size: calc(var(--s) * 3.4); line-height: 1.45; overflow: hidden; background: var(--bg) }
+.spin { position: relative; width: 0; height: 0; transform-style: preserve-3d }
+.spin > * { position: absolute; cursor: zoom-in } /* 크기·위치는 JS가 계산 */
+.slice { overflow: hidden; backface-visibility: hidden } /* 종이 뒷면 숨김 → 가운데 구멍으로 배경이 비쳐 뻥 뚫려 보임 */
+.slice > .sheet { position: absolute; top: 0; width: var(--w); height: 100% }
+/* 감긴 부분 음영: 옆으로 돌아갈수록 어둡게(--sh는 JS가 각도로 계산) */
+.slice::after { content: ''; position: absolute; inset: 0; background: #000; opacity: var(--sh, 0); pointer-events: none; z-index: 1 }
+.spin > figure > div { height: 100%; overflow: hidden }
+.spin .t { font-size: calc(var(--w) / 12); padding: calc(var(--w) / 14); background: var(--bg) } /* 칸 크기 따라 글자도 확대 */
+.spin img, .spin video { -webkit-user-drag: none; pointer-events: none }
+/* 롤 위·아래 단면: 겹겹이 감긴 종이 나이테 + 가운데 심 구멍 */
+.spin > .cap { cursor: inherit; border-radius: 50%; background: repeating-radial-gradient(circle, var(--paper) 0 3px, var(--paper-line) 3px 3.6px);
+  -webkit-mask: radial-gradient(circle, transparent var(--hole), #000 calc(var(--hole) + .5px)); mask: radial-gradient(circle, transparent var(--hole), #000 calc(var(--hole) + .5px)) }
+
+
+/* 3번: 종이 띠 위에 피그마 위치·크기 그대로 얹은 롤. 조각마다 그 구간에 걸친 자료만 잘라서 보여줌 */
+.spin > .paper { background: var(--bg); box-shadow: inset 0 1px rgba(0,0,0,.12), inset 0 -1px rgba(0,0,0,.12) } /* 피그마 배치 롤은 흰 종이, 위아래 옅은 테두리 */
+.paper > .piece { position: absolute; overflow: hidden; cursor: zoom-in }
+.piece > div { height: 100% }
+.piece .t { padding: calc(var(--s) * 3); font-size: calc(var(--s) * 6.5); line-height: 1.45; overflow: hidden }
+.spin > .paper { cursor: inherit }
+
+/* 크게 보기: 아무 데나 누르면 닫힘 */
+#lb { position: fixed; inset: 0; z-index: 10; background: var(--bg); display: grid; place-items: center; padding: 24px; cursor: zoom-out }
+#lb img, #lb video { max-width: 100%; max-height: calc(100vh - 48px); object-fit: contain; display: block }
+#lb .t { max-width: 60ch; max-height: calc(100vh - 48px); overflow: auto; white-space: pre-wrap; font-size: 16px; line-height: 1.7 }
+
+/* 오른쪽 위: 모양 토글(롤/원) / 아래 가운데: 재생 · 배속 */
+#ui { position: fixed; z-index: 5; top: calc(env(safe-area-inset-top, 0px) + 14px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 18px; font-size: 12px; line-height: 1 }
+#ui .shapes { display: flex; gap: 14px; perspective: 120px }
+/* 지금 보는 페이지 아이콘만 롤처럼 천천히 돎. 재생을 멈추면 같이 멈춤 */
+@keyframes turn { to { transform: rotateY(360deg) } }
+#ui [aria-current="true"] svg { animation: turn 6s linear infinite; animation-play-state: paused }
+#ui.playing [aria-current="true"] svg { animation-play-state: running }
+@media (prefers-reduced-motion: reduce) { #ui [aria-current="true"] svg { animation: none } }
+#ui button { all: unset; cursor: pointer; padding: 4px; display: grid; place-items: center; opacity: .3 }
+#ui button[aria-current="true"] { opacity: 1 }
+#ui .shapes button:not([aria-current="true"]):hover { opacity: .7 }
+#ui button:focus-visible { outline: 1px solid var(--fg) }
+#ui svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.4 }
+#tp { position: fixed; z-index: 5; bottom: calc(env(safe-area-inset-bottom, 0px) + 18px); left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 14px; font-size: 13px; line-height: 1 }
+#tp button { all: unset; cursor: pointer; padding: 6px; display: grid; place-items: center }
+#tp button:focus-visible { outline: 1px solid var(--fg) }
+#speed { min-width: 2.2em; justify-content: center; font-variant-numeric: tabular-nums }
+</style>
+</head>
+<body>
+
+<main id="pRoll" class="spin-page" hidden></main>
+<main id="pRing" class="spin-page" hidden></main>
+<main id="pFig" class="spin-page" hidden></main>
+<main id="pTwo" class="two" hidden><div class="spin-page"></div><div class="spin-page"></div></main>
+<main id="pOne" class="spin-page" hidden></main>
+<main id="pVert" class="cols" hidden><div class="spin-page"></div><div class="spin-page"></div></main>
+<div id="lb" hidden></div>
+<div id="ui">
+  <span class="shapes">
+    <button data-p="roll" aria-label="키친타올" class="egg" hidden><svg viewBox="0 0 18 18"><ellipse cx="9" cy="3.5" rx="4" ry="1.6"/><path d="M5 3.5v11c0 .9 1.8 1.6 4 1.6s4-.7 4-1.6v-11"/></svg></button>
+    <button data-p="fig" aria-label="피그마 배치 롤" class="egg" hidden><svg viewBox="0 0 18 18"><ellipse cx="9" cy="3.5" rx="4" ry="1.6"/><path d="M5 3.5v11c0 .9 1.8 1.6 4 1.6s4-.7 4-1.6v-11"/><rect x="6.6" y="7" width="2.2" height="2.6"/><rect x="9.6" y="9.6" width="1.8" height="3"/></svg></button>
+    <button data-p="two" aria-label="거침·부드러움 두 롤" class="egg" hidden><svg viewBox="0 0 18 18"><ellipse cx="5" cy="3.5" rx="3" ry="1.2"/><path d="M2 3.5v11c0 .7 1.3 1.2 3 1.2s3-.5 3-1.2v-11"/><ellipse cx="13" cy="3.5" rx="3" ry="1.2"/><path d="M10 3.5v11c0 .7 1.3 1.2 3 1.2s3-.5 3-1.2v-11"/></svg></button>
+    <button data-p="one" aria-label="세로 한 롤"><svg viewBox="0 0 18 18"><g id="tp0"><path d="M5.5 1.5h6a3 3 0 0 1 0 6h-6"/><circle cx="5.5" cy="4.5" r="3"/><circle cx="5.5" cy="4.5" r="1"/><path d="M8.5 7.5v9h6v-9.7"/><path d="M8.5 12.5h6" stroke-dasharray="1 1"/></g></svg></button>
+    <button data-p="vert" aria-label="세로 두 롤"><svg viewBox="0 0 26 18" style="width:26px"><g id="tp1"><path d="M3.5 1.5h6a3 3 0 0 1 0 6h-6"/><circle cx="3.5" cy="4.5" r="3"/><circle cx="3.5" cy="4.5" r="1"/><path d="M6.5 7.5v9h6v-9.7"/><path d="M6.5 12.5h6" stroke-dasharray="1 1"/></g><use href="#tp1" x="13"/></svg></button>
+    <button data-p="ring" aria-label="원통"><svg viewBox="0 0 18 18"><ellipse cx="9" cy="8" rx="7.5" ry="3"/><path d="M1.5 8v2c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V8"/></svg></button>
+  </span>
+</div>
+<div id="tp"><button id="play" aria-label="멈춤">❚❚</button><button id="speed" aria-label="배속">1×</button></div>
+
+<script src="items.js"></script>
+<script src="strip.js"></script>
+<script>
+// 들어올 때마다 새로 섞기 (Fisher–Yates)
+for (let i = ITEMS.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [ITEMS[i], ITEMS[j]] = [ITEMS[j], ITEMS[i]];
+}
+// 1번 롤 순서: 피그마(STRIP) 순서 먼저, 피그마에 아직 없는 자료는 그 뒤에 랜덤
+const keyOf = it => it.t === 'yt' ? 'yt:' + it.id : it.src || it.href || it.text; // 노래는 영상 id로 비교(피그마엔 썸네일 대신 뮤비 장면이 들어간 경우)
+const byKey = new Map(ITEMS.map(it => [keyOf(it), it]));
+const figKeys = new Set(VERT.map(keyOf));
+const ROLL_LIST = [...VERT.map(it => byKey.get(keyOf(it))).filter(Boolean), ...ITEMS.filter(it => !figKeys.has(keyOf(it)))];
+
+const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const $ = id => document.getElementById(id);
+
+function media(it) {
+  if (it.t === 'img') return Object.assign(document.createElement('img'), { className: 'm', src: it.src, alt: it.title || '' });
+  if (it.t === 'vid') return Object.assign(document.createElement('video'), { className: 'm', src: it.src, muted: true, loop: true, autoplay: true, playsInline: true });
+  if (it.t === 'yt') {
+    const a = Object.assign(document.createElement('a'), { href: 'https://www.youtube.com/watch?v=' + it.id, target: '_blank', rel: 'noopener' });
+    a.append(media({ t: 'img', src: it.src, title: it.title }));
+    return a;
+  }
+  if (it.t === 'link') return Object.assign(document.createElement('a'), { className: 't', href: it.href, target: '_blank', rel: 'noopener', textContent: it.href });
+  return Object.assign(document.createElement('div'), { className: 't', textContent: it.text });
+}
+const tagged = (els, k) => els.map(el => { el.dataset.k = k; return el; });
+
+// 재생 상태: 화면마다 따로 기억. 롤은 멈춘 채 시작(▶ 누를 때만 저절로 풀림)
+let playing = false, cur = 'roll';
+const playState = { roll: false, fig: false, two: false, one: false, vert: false, ring: !reduced };
+const playBtn = $('play');
+function syncPlay() {
+  playBtn.textContent = playing ? '❚❚' : '▶︎';
+  $('ui').classList.toggle('playing', playing);
+  playBtn.setAttribute('aria-label', playing ? '멈춤' : '재생');
+}
+function togglePlay(on = !playing) { playing = on; playState[cur] = on; syncPlay(); }
+playBtn.onclick = () => togglePlay();
+syncPlay();
+
+const ZOOM_MIN = 0.6, ZOOM_MAX = 14;
+const spins = [];
+
+// 원통: 전부 한 바퀴. 지름은 화면 폭 85%·높이 62% 안
+function ringGeom(wid, hgt) {
+  const n = ITEMS.length, t23 = Math.tan(Math.PI / 23);
+  const R = Math.min(0.85 * wid * t23, 0.62 * hgt / 5.6) / (2 * t23);
+  const w = 2 * R * Math.tan(Math.PI / n);
+  return { w, R, cells: ITEMS.map((_, i) => { const a = i * 2 * Math.PI / n; return { x: R * Math.sin(a), y: 0, z: R * Math.cos(a), a, w, h: w }; }) };
+}
+const ringEls = () => ITEMS.flatMap((it, k) => {
+  const f = document.createElement('figure'), box = document.createElement('div');
+  box.append(media(it));
+  f.append(box);
+  return tagged([f], k);
+});
+
+// 롤 공통: 길이 total짜리 종이 띠를 조각(폭 sw) count개로 나눔. 사용자가 끈 만큼(u) 그 방향(dir)으로 풀려 평평하게 깔리고
+// 나머지는 롤에 감김. 풀릴수록 롤이 얇아짐. 위·아래 단면(cap)에 나이테를 그려 많이 감겨 있을수록 두툼해 보이게.
+// posOf(q): q번째 조각이 띠 끝에서 몇 번째 자리인지(오른쪽으로 풀 땐 순서를 뒤집어야 그림이 좌우 반전 없이 보임)
+function woundCells(sp, H, sw, count, posOf) {
+  const total = count * sw, R0 = 0.22 * H, r0 = 0.07 * H, gap = 0.015 * H;
+  sp.u = Math.max(0, Math.min(total, sp.u));
+  sp.total = total;
+  const u = sp.u, d = sp.dir;
+  const Rc = Math.sqrt(r0 * r0 + (R0 * R0 - r0 * r0) * (1 - u / total)); // 남은 양만큼의 롤 반지름
+  const cells = [];
+  for (let q = 0; q < count; q++) {
+    const p = (posOf(q, d) + 0.5) * sw; // 띠 끝에서부터의 길이
+    if (p < u) { cells.push({ x: d * (u - p), y: 0, z: Rc, a: 0, w: sw, h: H }); continue; } // 풀린 부분: 옆으로 평평하게
+    const th = (p - u) / Rc, r = Rc - gap * th / (2 * Math.PI); // 감긴 부분: 바깥 한 바퀴만 그림
+    cells.push({ x: d * r * Math.sin(-th), y: 0, z: r * Math.cos(th), a: -d * th, w: sw, h: H, hide: th > 2 * Math.PI * 0.97 });
+  }
+  for (const y of [-H / 2, H / 2]) cells.push({ x: 0, y, z: 0, a: 0, tilt: 90, w: 2 * Rc, h: 2 * Rc, hole: r0, hide: Rc - r0 < 1 });
+  return { R: Rc, cells };
+}
+const rollHeight = (wid, hgt) => Math.min(0.62 * hgt, (wid < 600 ? 1.1 : 0.5) * wid);
+const capEls = () => [0, 1].map(() => Object.assign(document.createElement('div'), { className: 'cap' }));
+
+// 1번 키친타올: 한 장 = 자료 하나(세로로 긴 직사각형), 한 장을 SLICES 조각으로 나눠 휘게
+const TOWEL_SLICES = 6;
+function towelGeom(wid, hgt, sp) {
+  const H = rollHeight(wid, hgt), W = 0.55 * H, n = ROLL_LIST.length;
+  if (sp.u === undefined) sp.u = 1.5 * W; // 처음엔 끝 1장 반만 풀린 상태
+  sp.rate = 0.25 * W; // 1×: 4초에 한 장
+  const count = n * TOWEL_SLICES; // 오른쪽으로 풀 땐 순서를 통째로 뒤집어 왼→오 순서 유지(맨 끝 자료부터 풀려 나옴)
+  return { w: W, ...woundCells(sp, H, W / TOWEL_SLICES, count, (q, d) => d < 0 ? q : count - 1 - q) };
+}
+const towelEls = () => [...ROLL_LIST.flatMap((it, k) => tagged(Array.from({ length: TOWEL_SLICES }, (_, j) => {
+  const slice = Object.assign(document.createElement('div'), { className: 'slice' });
+  const sheet = Object.assign(document.createElement('div'), { className: 'sheet' });
+  sheet.style.left = `calc(var(--w) * ${-j / TOWEL_SLICES})`;
+  sheet.append(media(it));
+  slice.append(sheet);
+  return slice;
+}), k)), ...capEls()];
+
+// 피그마 배치 롤: 종이 띠 위에 피그마 위치·크기(STRIP, 캡처 픽셀) 그대로. 띠 높이 = 칸들의 세로 범위 + 여백
+// list마다 따로 만들 수 있게(2번 = 전부 한 롤, 3번 = 거침/부드러움 두 롤)
+const FIG_SLICE = 20, FIG_LEAD = 60, FIG_MARGIN = 20; // 캡처 픽셀 단위
+function makeFig(list) {
+  const x0 = Math.min(...list.map(it => it.x));
+  const L = list.map(it => ({ ...it, x: it.x - x0 })); // 각 롤의 시작을 0으로
+  const top = Math.min(...L.map(it => it.y)) - FIG_MARGIN;
+  const span = Math.max(...L.map(it => it.y + it.h)) + FIG_MARGIN - top;
+  const count = Math.ceil((Math.max(...L.map(it => it.x + it.w)) + 2 * FIG_LEAD) / FIG_SLICE);
+  const geom = (wid, hgt, sp) => {
+    const H = rollHeight(wid, hgt), s = H / span; // 캡처 1픽셀 = s
+    if (sp.u === undefined) sp.u = 4 * FIG_SLICE * s;
+    sp.rate = 40 * s; // 1×: 캡처 40픽셀/초
+    sp.s = s;
+    return { w: H, ...woundCells(sp, H, FIG_SLICE * s, count, (q, d) => d < 0 ? q : count - 1 - q) };
+  };
+  const els = () => [...Array.from({ length: count }, (_, q) => {
+    const a = q * FIG_SLICE - FIG_LEAD; // 이 조각이 맡은 캡처 구간 [a, a + SLICE]
+    const paper = Object.assign(document.createElement('div'), { className: 'slice paper' });
+    L.forEach((it, k) => {
+      if (it.x + it.w <= a || it.x >= a + FIG_SLICE) return;
+      const piece = Object.assign(document.createElement('div'), { className: 'piece' });
+      piece.style.cssText = `left: calc(var(--s) * ${it.x - a}); top: calc(var(--s) * ${it.y - top}); width: calc(var(--s) * ${it.w}); height: calc(var(--s) * ${it.h})`;
+      const box = document.createElement('div');
+      box.append(media(it));
+      piece.append(box);
+      paper.append(...tagged([piece], k));
+    });
+    return paper;
+  }), ...capEls()];
+  return { geom, els, list: L };
+}
+
+// opt.pull: 좌우 드래그를 회전 대신 '풀기'로 씀(롤). opt.list: 크게 볼 때 data-k가 가리키는 목록. opt.dir: 처음 푸는 방향
+function makeSpin(page, geom, tilt, makeEls, opt = {}) {
+  const sp = { page, root: opt.root || page, el: null, rx: tilt, ry: opt.ry ?? 0, zoom: 1, R: 0, dragging: false, dir: opt.dir ?? 1, auto: !opt.pull };
+  sp.layout = () => {
+    const g = geom(page.clientWidth, page.clientHeight, sp), z = sp.zoom;
+    sp.R = g.R * z;
+    sp.el.style.setProperty('--w', g.w * z + 'px');
+    if (sp.s) sp.el.style.setProperty('--s', sp.s * z + 'px');
+    // 확대 = 모든 길이에 zoom을 곱해 선명하게 다시 그리기(원근도 같이 늘려야 모양 유지)
+    page.style.perspective = 1600 * z + 'px';
+    [...sp.el.children].forEach((f, i) => {
+      const c = g.cells[i];
+      f.hidden = !!c.hide;
+      if (c.hide) return;
+      Object.assign(f.style, { width: c.w * z + 0.6 + 'px', /* 조각 사이 틈 안 보이게 살짝 겹침 */ height: c.h * z + 'px', left: -c.w * z / 2 + 'px', top: -c.h * z / 2 + 'px' });
+      if (c.hole) f.style.setProperty('--hole', c.hole * z + 'px');
+      if (f.classList.contains('slice')) f.style.setProperty('--sh', ((1 - Math.cos(c.a)) * 0.14).toFixed(3));
+      f.style.transform = `translate3d(${c.x * z}px, ${c.y * z}px, ${c.z * z}px) rotateY(${c.a}rad)` + (c.tilt ? ` rotateX(${c.tilt}deg)` : '');
+    });
+  };
+  sp.build = () => {
+    sp.el = Object.assign(document.createElement('div'), { className: 'spin' });
+    sp.el.append(...makeEls());
+    page.append(sp.el);
+    if (opt.mobileZoom && page.clientWidth < 600) sp.zoom = opt.mobileZoom;
+    sp.layout();
+    addEventListener('resize', sp.layout);
+  };
+  // 확대할수록 앞쪽이 화면 가운데 오도록 위로 당기기
+  sp.draw = () => {
+    const lift = (1 - 1 / sp.zoom) * sp.R * Math.sin(sp.rx * Math.PI / 180);
+    const off = opt.vertical ? -0.3 * page.clientHeight : 0; // 세로 롤은 화면 위쪽에 두고 아래로 풀림
+    sp.el.style.transform = `translateY(${lift + off}px) rotateX(${sp.rx}deg) rotateY(${sp.ry}deg)` + (opt.vertical ? ' rotateZ(90deg)' : '');
+  };
+  const setZoom = z => { sp.zoom = Math.max(opt.zoomMin ?? ZOOM_MIN, Math.min(ZOOM_MAX, z)); sp.layout(); };
+
+  // 확대: 휠·트랙패드 핀치, 휴대폰 두 손가락
+  page.addEventListener('wheel', e => { e.preventDefault(); setZoom(sp.zoom * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0015))); }, { passive: false });
+  const touches = new Map();
+  let pinch = 0, px = 0, py = 0, moved = 0;
+  const spread = () => { const [a, b] = [...touches.values()]; return Math.hypot(a.x - b.x, a.y - b.y); };
+  page.addEventListener('pointerdown', e => {
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { pinch = spread(); moved = 99; return; }
+    sp.dragging = true; moved = 0; px = e.clientX; py = e.clientY; page.setPointerCapture(e.pointerId);
+  });
+  page.addEventListener('pointercancel', e => { touches.delete(e.pointerId); sp.dragging = false; });
+  // 드래그: 좌우 = 돌리기(롤은 풀기), 위아래 = 기울이기
+  page.addEventListener('pointermove', e => {
+    if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size === 2) { const d = spread(); setZoom(sp.zoom * d / pinch); pinch = d; return; }
+    if (!sp.dragging) return;
+    let dx = e.clientX - px, dy = e.clientY - py; const k = 0.3 / Math.sqrt(sp.zoom);
+    if (opt.vertical) [dx, dy] = [dy, -dx]; // 세로 롤: 위아래로 끌면 풀림, 좌우로 끌면 기울기
+    px = e.clientX; py = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
+    if (opt.pull) {
+      if (sp.u < 1 && dx) sp.dir = Math.sign(dx); // 다 감긴 상태면 처음 끄는 방향으로 풀림
+      sp.u += sp.dir * dx / sp.zoom;
+      sp.layout();
+    } else sp.ry += dx * k;
+    if (opt.vertical) sp.ry = Math.max(-70, Math.min(70, sp.ry - dy * k));
+    else sp.rx = Math.max(-70, Math.min(70, sp.rx - dy * k));
+    sp.draw();
+  });
+  // 움직이지 않고 뗐을 때: 자료 위면 크게 보기, 빈 곳이면 멈춤/재생
+  page.addEventListener('pointerup', e => {
+    touches.delete(e.pointerId);
+    sp.dragging = false;
+    if (moved >= 5) return;
+    const f = document.elementsFromPoint(e.clientX, e.clientY).map(el => el.closest('.spin [data-k]')).find(Boolean);
+    if (f) showBig(opt.list[f.dataset.k]); else togglePlay();
+  });
+  spins.push(sp);
+  return sp;
+}
+const pRoll = $('pRoll'), pRing = $('pRing'), pFig = $('pFig'), pTwo = $('pTwo');
+makeSpin(pRoll, towelGeom, -18, towelEls, { pull: true, zoomMin: 0.15, list: ROLL_LIST });
+makeSpin(pRing, ringGeom, -14, ringEls, { mobileZoom: 2.6, list: ITEMS });
+const figAll = makeFig(STRIP);
+makeSpin(pFig, figAll.geom, -18, figAll.els, { pull: true, zoomMin: 0.15, list: figAll.list });
+// 3번: 거침(위) · 부드러움(아래) 두 롤. 각 반쪽에서 끌면 그 롤만 풀림
+[0, 1].forEach(g => {
+  const f = makeFig(STRIP.filter(it => it.g === g));
+  makeSpin(pTwo.children[g], f.geom, -18, f.els, { pull: true, zoomMin: 0.15, list: f.list, root: pTwo });
+});
+
+// 세로 두 롤: 한 줄에 하나씩, 여백 없이 위에서 아래로 이어 붙임(VERT 순서). 종이 폭 = 100단위, 길이 = 폭 × ar
+const V_SLICE = 6; // 단위
+function makeVert(list) {
+  let pos = 0;
+  const L = list.map(it => { const len = 100 * it.ar, r = { ...it, at: pos, len }; pos += len; return r; });
+  const count = Math.ceil(pos / V_SLICE);
+  const geom = (wid, hgt, sp) => {
+    const H = Math.min(0.62 * wid, 0.38 * hgt), s = H / 100; // H = 종이 폭(롤 길이)
+    if (sp.u === undefined) sp.u = 0.5 * H;
+    sp.rate = 18 * s; // 1×: 초당 18단위
+    sp.s = s;
+    return { w: H, ...woundCells(sp, H, V_SLICE * s, count, (q, d) => d < 0 ? q : count - 1 - q) };
+  };
+  // 롤을 90° 돌려 세웠기 때문에 종이 길이 방향(아래) = 조각 안의 left. 자료는 반대로 돌려 바로 보이게
+  const els = () => [...Array.from({ length: count }, (_, q) => {
+    const a = q * V_SLICE;
+    const paper = Object.assign(document.createElement('div'), { className: 'slice paper' });
+    L.forEach((it, k) => {
+      if (it.at + it.len <= a || it.at >= a + V_SLICE) return;
+      const piece = Object.assign(document.createElement('div'), { className: 'vpiece' });
+      piece.style.cssText = `left: calc(var(--s) * ${it.at - a}); top: 0; width: calc(var(--s) * ${it.len}); height: calc(var(--s) * 100)`;
+      const box = document.createElement('div');
+      box.style.cssText = `width: calc(var(--s) * 100); height: calc(var(--s) * ${it.len}); left: calc(var(--s) * ${(it.len - 100) / 2}); top: calc(var(--s) * ${(100 - it.len) / 2})`;
+      box.append(media(it));
+      piece.append(box);
+      paper.append(...tagged([piece], k));
+    });
+    return paper;
+  }), ...capEls()];
+  return { geom, els, list: L };
+}
+// 세로 한 롤: 부드러움 → 거침 순으로 이어 붙임. 롤은 목록 끝부터 풀리므로 거침 마지막(드라큘라)이 첫 장면,
+// 거침을 명확→모호로 거슬러 나온 뒤 부드러움이 이어짐
+const pOne = $('pOne'), one = makeVert([...VERT.filter(it => it.g === 1), ...VERT.filter(it => it.g === 0)]);
+makeSpin(pOne, one.geom, -8, one.els, { pull: true, zoomMin: 0.15, list: one.list, vertical: true, ry: -18 });
+const pVert = $('pVert');
+[0, 1].forEach(g => {
+  const v = makeVert(VERT.filter(it => it.g === g));
+  makeSpin(pVert.children[g], v.geom, -8, v.els, { pull: true, zoomMin: 0.15, list: v.list, root: pVert, vertical: true, ry: -18 });
+});
+
+// 크게 보기. 한 번 더 누르면 닫힘(노래·링크는 눌러서 열 수 있음)
+const lb = $('lb');
+function showBig(it) {
+  const m = media(it);
+  if (m.tagName === 'VIDEO') m.controls = true;
+  lb.replaceChildren(m);
+  lb.hidden = false;
+}
+lb.addEventListener('click', () => { lb.hidden = true; lb.replaceChildren(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') lb.click(); });
+
+// 배속: 누를 때마다 1× → 2× → 3× → 1×. 원통은 도는 속도, 롤은 저절로 풀리는 속도
+const speedBtn = $('speed');
+let mult = 1;
+speedBtn.onclick = () => { mult = mult % 3 + 1; speedBtn.textContent = mult + '×'; };
+
+// 움직임은 프레임 수가 아니라 실제 시간 기준(120Hz 폰에서 두 배 빨라지지 않게)
+const RING_DEG_PER_SEC = 6; // 1×: 한 바퀴 1분. 확대돼 있으면 그만큼 천천히
+let last = 0;
+function step(now) {
+  const dt = last ? Math.min(now - last, 100) / 1000 : 0; // 탭 전환 후 한꺼번에 튀지 않게 최대 0.1초
+  last = now;
+  for (const sp of spins) {
+    if (!sp.el || sp.root.hidden) continue;
+    const moving = playing && !sp.dragging && lb.hidden;
+    if (sp.auto && moving) sp.ry += RING_DEG_PER_SEC * mult * dt / Math.sqrt(sp.zoom);
+    if (!sp.auto && moving) { // 롤: 재생 중엔 끄는 방향으로 저절로 풀림, 다 풀리면 다시 다 감긴 상태부터
+      sp.u = sp.u >= sp.total ? 0 : sp.u + sp.rate * mult * dt;
+      sp.layout();
+    }
+    sp.draw();
+  }
+  requestAnimationFrame(step);
+}
+requestAnimationFrame(step);
+
+const pages = { roll: pRoll, fig: pFig, two: pTwo, one: pOne, vert: pVert, ring: pRing };
+const pageBtns = document.querySelectorAll('#ui [data-p]');
+function show(p) {
+  for (const [k, el] of Object.entries(pages)) el.hidden = k !== p;
+  cur = p;
+  playing = playState[cur];
+  syncPlay();
+  for (const s of spins) if (!s.root.hidden && !s.el) s.build();
+  pageBtns.forEach(o => o.setAttribute('aria-current', o.dataset.p === p));
+}
+// 이스터에그: 지금 도는 아이콘을 빠르게 세 번 누르면 숨겨 둔 롤 세 개가 나타남
+let eggTaps = 0, eggTimer = 0;
+pageBtns.forEach(b => b.onclick = () => {
+  if (b.dataset.p === cur) {
+    eggTaps++;
+    clearTimeout(eggTimer);
+    eggTimer = setTimeout(() => { eggTaps = 0; }, 600);
+    if (eggTaps >= 3) document.querySelectorAll('#ui .egg').forEach(e => { e.hidden = false; });
+    return;
+  }
+  eggTaps = 0;
+  show(b.dataset.p);
+});
+show('one');
+</script>
+</body>
+</html>
